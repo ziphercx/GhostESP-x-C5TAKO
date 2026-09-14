@@ -172,7 +172,7 @@ extern "C" {
 
 
 #if defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789)
-  #if defined(CONFIG_USE_ENCODER)
+  #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_BOARD_C5TAKO)
     #define SPI_TFT_SPI_MODE (0)
   #else
     #define SPI_TFT_SPI_MODE (2)

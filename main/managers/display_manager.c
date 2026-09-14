@@ -881,6 +881,8 @@ static uint8_t tdeck_voltage_to_percent(int mv) {
     return s_tdeck_soc_table[TDECK_SOC_TABLE_SIZE - 1].percent;
 }
 
+#elif defined(CONFIG_BOARD_C5TAKO)
+#define _batAdcCh ADC1_GPIO6_CHANNEL
 #elif CONFIG_USE_TDISPLAY_S3
 #define _batAdcCh ADC1_GPIO4_CHANNEL
 #endif
@@ -914,6 +916,9 @@ int getBattery() {
 
         adc_cali_curve_fitting_config_t cali_cfg = {
             .unit_id = _batAdcUnit,
+#ifdef CONFIG_BOARD_C5TAKO
+            .chan = _batAdcCh,
+#endif
             .atten    = _batAdcAtten,
             .bitwidth= ADC_BITWIDTH_DEFAULT,
         };
@@ -927,7 +932,21 @@ int getBattery() {
 
     // raw ADC → calibrated millivolt
     int raw = 0;
-    esp_err_t ret = adc_oneshot_read(handle, _batAdcCh, &raw);
+    esp_err_t ret;
+#ifdef CONFIG_BOARD_C5TAKO
+    gpio_set_level(26, 1);
+    vTaskDelay(pdMS_TO_TICKS(3) + 1);
+    int sum = 0;
+    for (int i = 0; i < 16; ++i) {
+        ret = adc_oneshot_read(handle, _batAdcCh, &raw);
+        if (ret != ESP_OK) break;
+        sum += raw;
+    }
+    gpio_set_level(26, 0); // Also disable the divider on read failure.
+    raw = sum / 16;
+#else
+    ret = adc_oneshot_read(handle, _batAdcCh, &raw);
+#endif
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "ADC read failed: %s", esp_err_to_name(ret));
         return -1;
@@ -950,7 +969,9 @@ int getBattery() {
         mv = raw * 3300 / 4095;
     }
 
-#ifdef CONFIG_USE_CARDPUTER
+#ifdef CONFIG_BOARD_C5TAKO
+    mv = mv * CONFIG_C5TAKO_BATTERY_SCALE_PERMILLE / 1000;
+#elif defined(CONFIG_USE_CARDPUTER)
     // Cardputer divides the battery voltage roughly in half with a resistor divider.
     // Scale the measured voltage back up to actual battery voltage.
     mv = (mv * 2);
@@ -993,6 +1014,8 @@ int getBattery() {
             _isCharging = false;
         }
     }
+#elif defined(CONFIG_BOARD_C5TAKO)
+    _isCharging = false; // No charger-status GPIO on the carrier.
 #else
     if (last_mv != 0) {
         int diff = mv - last_mv;
@@ -1039,7 +1062,11 @@ int getBattery() {
     percent = tdeck_voltage_to_percent(mv_for_percent);
 #else
     const int min_mv = 3300;
+#ifdef CONFIG_BOARD_C5TAKO
+    const int max_mv = 4150; // Same nominal percentage range as Marauder C5TAKO.
+#else
     const int max_mv = 4200;
+#endif
     if (mv_for_percent <= min_mv) {
         percent = 0;
     } else if (mv_for_percent >= max_mv) {

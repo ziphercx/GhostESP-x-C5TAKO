@@ -685,6 +685,19 @@ static void deferred_sd_init_task(void *arg) {
 }
 
 void app_main(void) {
+#ifdef CONFIG_BOARD_C5TAKO
+    // Deselect every shared-SPI device before either driver starts.
+    const int high_pins[] = {7, 5, 2, 27}; // TFT, SD, CC1101, active-low user LED
+    const int low_pins[] = {25, 3, 26};    // backlight, silent buzzer, divider
+    for (size_t i = 0; i < sizeof(high_pins) / sizeof(high_pins[0]); ++i) {
+        gpio_set_level(high_pins[i], 1);
+        ESP_ERROR_CHECK(gpio_set_direction(high_pins[i], GPIO_MODE_OUTPUT));
+    }
+    for (size_t i = 0; i < sizeof(low_pins) / sizeof(low_pins[0]); ++i) {
+        gpio_set_level(low_pins[i], 0);
+        ESP_ERROR_CHECK(gpio_set_direction(low_pins[i], GPIO_MODE_OUTPUT));
+    }
+#endif
     memory_debug_init();
     memory_debug_start_boot_trace();
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
@@ -970,10 +983,9 @@ void app_main(void) {
             comm_rx = UART_PIN_NO_CHANGE;
         }
 #endif
-#ifdef CONFIG_CROWPANEL_EPAPER_42
-        /* GPIO7 is the factory display-power enable, not a UART input. This
-         * board has no wired peer-comm header, so leave the optional manager
-         * off rather than stealing the display rail. */
+#if defined(CONFIG_CROWPANEL_EPAPER_42) || defined(CONFIG_BOARD_C5TAKO)
+        /* GPIO6/7 are occupied by carrier hardware. These boards have no
+         * wired peer-comm header, so leave the optional manager off. */
         comm_tx = UART_PIN_NO_CHANGE;
         comm_rx = UART_PIN_NO_CHANGE;
 #endif

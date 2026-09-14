@@ -7,6 +7,22 @@ menu "Ghost ESP Options"
         default "unknown_board"
         help
             Specify GESP build config template that was used at build time.
+
+    config BOARD_C5TAKO
+        bool "C5TAKO carrier for XIAO ESP32-C5"
+        depends on IDF_TARGET_ESP32C5
+        select LV_TFT_DISPLAY_OFFSETS
+        default n
+        help
+            Shared-SPI ST7789/SD carrier with five buttons and switched battery divider.
+
+    config C5TAKO_BATTERY_SCALE_PERMILLE
+        int "C5TAKO battery divider scale (permille)"
+        depends on BOARD_C5TAKO
+        range 1000 4000
+        default 2000
+        help
+            Calibrate against a multimeter; 2000 represents the nominal 1:2 divider.
     endmenu
     
     menu "LED Options"

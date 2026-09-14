@@ -82,6 +82,24 @@ void st7789_init(void)
     };
 
     static const lcd_init_cmd_t st7789_generic_init_cmds[] = {
+#ifdef CONFIG_BOARD_C5TAKO
+        // Register values from the working Bruce C5TAKO TFT_eSPI initialization.
+        {ST7789_SLPOUT, {0}, 0x80},
+        {ST7789_NORON, {0}, 0},
+        {ST7789_MADCTL, {0x00}, 1},
+        {0xB6, {0x0A, 0x82}, 2},
+        {ST7789_RAMCTRL, {0x00, 0xE0}, 2},
+        {ST7789_COLMOD, {0x55}, 1},
+        {ST7789_PORCTRL, {0x0C, 0x0C, 0x00, 0x33, 0x33}, 5},
+        {ST7789_GCTRL, {0x35}, 1},
+        {ST7789_VCOMS, {0x28}, 1},
+        {ST7789_LCMCTRL, {0x0C}, 1},
+        {ST7789_VDVVRHEN, {0x01, 0xFF}, 2},
+        {ST7789_VRHS, {0x10}, 1},
+        {ST7789_VDVSET, {0x20}, 1},
+        {ST7789_FRCTR2, {0x0F}, 1},
+        {ST7789_PWCTRL1, {0xA4, 0xA1}, 2},
+#else
         {0xCF, {0x00, 0x83, 0X30}, 3},
         {0xED, {0x64, 0x03, 0X12, 0X81}, 4},
         {ST7789_PWCTRL2, {0x85, 0x01, 0x79}, 3},
@@ -93,22 +111,27 @@ void st7789_init(void)
         {ST7789_VCMOFSET, {0x35, 0x3E}, 2},
         {ST7789_CABCCTRL, {0xBE}, 1},
         {ST7789_COLMOD, {0x55}, 1},
+#endif
 #if ST7789_INVERT_COLORS == 1
 		{ST7789_INVON, {0}, 0}, // set inverted mode
 #else
  		{ST7789_INVOFF, {0}, 0}, // set non-inverted mode
 #endif
+#ifndef CONFIG_BOARD_C5TAKO
         {ST7789_RGBCTRL, {0x00, 0x1B}, 2},
         {0xF2, {0x08}, 1},
         {ST7789_GAMSET, {0x01}, 1},
+#endif
         {ST7789_PVGAMCTRL, {0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x32, 0x44, 0x42, 0x06, 0x0E, 0x12, 0x14, 0x17}, 14},
         {ST7789_NVGAMCTRL, {0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x31, 0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E}, 14},
+#ifndef CONFIG_BOARD_C5TAKO
         {ST7789_CASET, {0x00, 0x00, 0x00, 0xEF}, 4},
         {ST7789_RASET, {0x00, 0x00, 0x01, 0x3f}, 4},
         {ST7789_RAMWR, {0}, 0},
         {ST7789_GCTRL, {0x07}, 1},
         {0xB6, {0x0A, 0x82, 0x27, 0x00}, 4},
         {ST7789_SLPOUT, {0}, 0x80},
+#endif
         {0, {0}, 0xff},
     };
 
@@ -165,7 +188,11 @@ void st7789_init(void)
         st7789_send_cmd(st7789_init_cmds[cmd].cmd);
         st7789_send_data(st7789_init_cmds[cmd].data, st7789_init_cmds[cmd].databytes&0x1F);
         if (st7789_init_cmds[cmd].databytes & 0x80) {
+#ifdef CONFIG_BOARD_C5TAKO
+                vTaskDelay(pdMS_TO_TICKS(120));
+#else
                 vTaskDelay(100 / portTICK_PERIOD_MS);
+#endif
         }
         cmd++;
     }
@@ -296,7 +323,11 @@ static void st7789_set_orientation(uint8_t orientation)
 
     uint8_t data[] =
     {
-#if defined(CONFIG_CROWPANEL_ADVANCE_SMALL_SPI_LCD)
+#if defined(CONFIG_BOARD_C5TAKO)
+    /* TFT_eSPI reference rotation 0: RGB, no mirrors or XY swap.
+     * Explicit configured offsets avoid the generic square-panel +80 shift. */
+    0x00, 0xC0, 0xA0, 0x60
+#elif defined(CONFIG_CROWPANEL_ADVANCE_SMALL_SPI_LCD)
     /* Match Elecrow's ESP-IDF LVGL port: swap_xy=true, mirror_x=false,
      * mirror_y=true, RGB element order.  The previous 0xB8 also enabled
      * BGR and ML, which produced incorrect colors and panel orientation. */

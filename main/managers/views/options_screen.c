@@ -5670,6 +5670,12 @@ static bool settings_select_handle_input(InputEvent *event) {
 
     if (event->type == INPUT_TYPE_JOYSTICK) {
         int button = event->data.joystick_index;
+#ifdef CONFIG_BOARD_C5TAKO
+        if (button == 0) {
+            settings_select_close();
+            return true;
+        }
+#endif
         if (button == 2 || button == 0) {
             gui_select_overlay_move(settings_select_overlay, -1);
         } else if (button == 4 || button == 3) {
@@ -5731,6 +5737,12 @@ static bool settings_confirm_handle_input(InputEvent *event) {
     }
     if (event->type == INPUT_TYPE_JOYSTICK) {
         int button = event->data.joystick_index;
+#ifdef CONFIG_BOARD_C5TAKO
+        if (button == 0) {
+            popup_confirm_cancel(active_popup);
+            return true;
+        }
+#endif
         if (button == 1) popup_confirm_select(active_popup);
         else if (button == 0) popup_confirm_set_selected(active, 0);
         else if (button == 3) popup_confirm_set_selected(active, 1);
