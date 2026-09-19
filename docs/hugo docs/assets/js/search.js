@@ -11,6 +11,8 @@
   let selectedIndex = -1;
   let debounceTimer = null;
   const indexUrl = input.dataset.searchIndex || 'index.json';
+  const fallbackUrl = input.dataset.searchFallback || 'index.json';
+  const searchPageUrl = input.dataset.searchPage || 'search/';
   const versionEl = document.querySelector('[data-current-version]');
   const currentVersion = versionEl ? versionEl.dataset.currentVersion : null;
 
@@ -132,11 +134,27 @@
     });
   };
 
+  const appendSearchAllLink = (query) => {
+    const trimmed = (query || '').trim();
+    if (!trimmed || !searchPageUrl) return;
+    const link = document.createElement('a');
+    link.className = 'sidebar__result-all';
+    const params = new URLSearchParams({ q: trimmed });
+    if (currentVersion) params.set('version', currentVersion);
+    link.href = `${searchPageUrl}?${params.toString()}`;
+    link.textContent = `Search all versions for “${trimmed}”`;
+    resultsContainer.appendChild(link);
+  };
+
   const renderResults = (results, query) => {
     resultsContainer.innerHTML = '';
 
     if (!results.length) {
-      resultsContainer.innerHTML = `<div class="sidebar__result--empty">${currentVersion ? 'No results found in this version' : 'No results found'}</div>`;
+      const empty = document.createElement('div');
+      empty.className = 'sidebar__result--empty';
+      empty.textContent = currentVersion ? 'No results found in this version' : 'No results found';
+      resultsContainer.appendChild(empty);
+      appendSearchAllLink(query);
       resultsContainer.dataset.visible = 'true';
       return;
     }
@@ -160,6 +178,8 @@
       item.innerHTML = `<strong>${title}</strong>${snippet ? `<span>${snippet}</span>` : ''}`;
       resultsContainer.appendChild(item);
     });
+
+    appendSearchAllLink(query);
 
     selectedIndex = -1;
     resultsContainer.dataset.visible = 'true';
@@ -208,9 +228,22 @@
     if (hasLoaded || loading) return;
     loading = true;
     try {
-      const response = await fetch(indexUrl, { credentials: 'same-origin' });
-      if (!response.ok) throw new Error('Failed to fetch search index');
-      const data = await response.json();
+      const candidates = [indexUrl, fallbackUrl].filter((url, i, arr) => url && arr.indexOf(url) === i);
+      let data = null;
+      for (const url of candidates) {
+        try {
+          const response = await fetch(url, { credentials: 'same-origin' });
+          if (!response.ok) continue;
+          const parsed = await response.json();
+          if (Array.isArray(parsed) && parsed.length) {
+            data = parsed;
+            break;
+          }
+        } catch (error) {
+          // Try the next candidate index.
+        }
+      }
+      if (!data) throw new Error('Failed to fetch search index');
       
       fuse = new Fuse(data, {
         keys: [
