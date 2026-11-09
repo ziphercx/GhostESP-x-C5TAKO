@@ -25,8 +25,8 @@ def _config_value(defaults: Path) -> int | None:
 
 def _kconfig_pattern() -> re.Pattern[str]:
     return re.compile(
-        r"(config " + KCONFIG_SYMBOL + r"\n"
-        r"(?:(?!\n\s*config ).)*?\n\s*default )(\d+)(\n)",
+        r"(config " + KCONFIG_SYMBOL + r"\r?\n"
+        r"(?:(?!\r?\n\s*config ).)*?\r?\n\s*default )(\d+)(\r?\n)",
         re.DOTALL,
     )
 
