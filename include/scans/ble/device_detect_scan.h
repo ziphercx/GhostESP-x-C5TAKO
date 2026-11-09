@@ -19,6 +19,9 @@ typedef enum {
     BLE_DETECT_DEVICE_HEARING_AID,
     BLE_DETECT_DEVICE_GAEN,
     BLE_DETECT_DEVICE_CHAMELEON,
+    BLE_DETECT_DEVICE_META_GLASSES,
+    BLE_DETECT_DEVICE_GOOGLE_TAG,
+    BLE_DETECT_DEVICE_NEST,
 } BLEDetectDeviceType;
 
 typedef struct {
@@ -28,6 +31,7 @@ typedef struct {
     char name[32];
     char subtype[20];
     bool tracking;
+    uint32_t last_seen_ms;  // esp_timer ms of the latest advertisement
 } BLEDetectDeviceInfo;
 
 void ble_device_detect_start(void);

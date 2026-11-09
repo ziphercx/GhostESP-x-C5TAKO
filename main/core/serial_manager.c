@@ -107,8 +107,20 @@ static int cursor_position = 0;
 // currently mid-line must not be appended to it (see serial_task()).
 static int8_t last_input_source = -1;
 
-// Command history instance
-EXT_RAM_BSS_ATTR static CommandHistory command_history;
+// Command history instance.  Allocated on first use so it does not reserve
+// 1.5 KB of DRAM on boards that never open the serial shell.
+static CommandHistory *command_history = NULL;
+
+static CommandHistory *command_history_get(void) {
+    if (!command_history) {
+        command_history = heap_caps_calloc(1, sizeof(*command_history),
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!command_history) {
+            command_history = calloc(1, sizeof(*command_history));
+        }
+    }
+    return command_history;
+}
 
 // Prompt display tracking
 static bool prompt_displayed = false;
@@ -138,8 +150,15 @@ typedef enum {
 
 static html_capture_state_t html_capture_state = HTML_STATE_IDLE;
 static char *html_capture_buffer = NULL;
-#define HTML_CAPTURE_BUF_SIZE 2048
+// Leave headroom for the close marker so it can always be detected and stripped
+// even when the app uploads the maximum accepted payload size.
+#define HTML_CAPTURE_BUF_SIZE 4096
 static size_t html_capture_pos = 0;
+
+#define HTML_INLINE_BEGIN_MARKER "[HTML/BEGIN]"
+#define HTML_INLINE_CLOSE_MARKER "[HTML/CLOSE]"
+// Tracks a partial close-marker match when the capture buffer is full.
+static size_t html_close_match = 0;
 
 // IR capture state
 #if CONFIG_HAS_INFRARED
@@ -150,8 +169,12 @@ typedef enum {
 
 static ir_capture_state_t ir_capture_state = IR_STATE_IDLE;
 static char *ir_capture_buffer = NULL;
-#define IR_CAPTURE_BUF_SIZE 2048
+// Large enough for a full raw Flipper .ir block (the whole "data:" timing
+// line arrives on one line and can be many KB).
+#define IR_CAPTURE_BUF_SIZE 8192
 static size_t ir_capture_pos = 0;
+
+#define IR_INLINE_CLOSE_MARKER "[IR/CLOSE]"
 #endif
 
 typedef enum {
@@ -304,57 +327,62 @@ static bool handle_peer_badusb_trackpad_fast(const char *command) {
 
 // Command history management functions
 void command_history_init(void) {
-    command_history.current_index = 0;
-    command_history.history_count = 0;
-    command_history.display_index = -1;
-    memset(command_history.commands, 0, sizeof(command_history.commands));
+    CommandHistory *h = command_history_get();
+    if (!h) return;
+    h->current_index = 0;
+    h->history_count = 0;
+    h->display_index = -1;
+    memset(h->commands, 0, sizeof(h->commands));
 }
 
 void command_history_add(const char* command) {
     if (command == NULL || strlen(command) == 0) {
         return;
     }
+    CommandHistory *h = command_history_get();
+    if (!h) return;
     
     // Don't add duplicate consecutive commands
-    if (command_history.history_count > 0) {
-        int last_index = (command_history.current_index - 1 + MAX_HISTORY_SIZE) % MAX_HISTORY_SIZE;
-        if (strcmp(command_history.commands[last_index], command) == 0) {
+    if (h->history_count > 0) {
+        int last_index = (h->current_index - 1 + MAX_HISTORY_SIZE) % MAX_HISTORY_SIZE;
+        if (strcmp(h->commands[last_index], command) == 0) {
             return;
         }
     }
     
     // Add command to current position
-    strncpy(command_history.commands[command_history.current_index], command, MAX_COMMAND_LENGTH - 1);
-    command_history.commands[command_history.current_index][MAX_COMMAND_LENGTH - 1] = '\0';
+    strncpy(h->commands[h->current_index], command, MAX_COMMAND_LENGTH - 1);
+    h->commands[h->current_index][MAX_COMMAND_LENGTH - 1] = '\0';
     
     // Move to next position
-    command_history.current_index = (command_history.current_index + 1) % MAX_HISTORY_SIZE;
+    h->current_index = (h->current_index + 1) % MAX_HISTORY_SIZE;
     
     // Update history count
-    if (command_history.history_count < MAX_HISTORY_SIZE) {
-        command_history.history_count++;
+    if (h->history_count < MAX_HISTORY_SIZE) {
+        h->history_count++;
     }
     
     // Reset display index when new command is added
-    command_history.display_index = -1;
+    h->display_index = -1;
 }
 
 const char* command_history_get_previous(void) {
-    if (command_history.history_count == 0) {
+    CommandHistory *h = command_history_get();
+    if (!h || h->history_count == 0) {
         return NULL;
     }
     
-    if (command_history.display_index == -1) {
+    if (h->display_index == -1) {
         // First time navigating, start from the most recent command
-        command_history.display_index = (command_history.current_index - 1 + MAX_HISTORY_SIZE) % MAX_HISTORY_SIZE;
+        h->display_index = (h->current_index - 1 + MAX_HISTORY_SIZE) % MAX_HISTORY_SIZE;
     } else {
         // Move to previous command
-        command_history.display_index = (command_history.display_index - 1 + MAX_HISTORY_SIZE) % MAX_HISTORY_SIZE;
+        h->display_index = (h->display_index - 1 + MAX_HISTORY_SIZE) % MAX_HISTORY_SIZE;
     }
     
     // Additional safety check to ensure we have a valid command
-    if (command_history.display_index >= 0 && command_history.display_index < MAX_HISTORY_SIZE) {
-        const char* cmd = command_history.commands[command_history.display_index];
+    if (h->display_index >= 0 && h->display_index < MAX_HISTORY_SIZE) {
+        const char* cmd = h->commands[h->display_index];
         if (cmd != NULL && strlen(cmd) > 0) {
             return cmd;
         }
@@ -364,26 +392,27 @@ const char* command_history_get_previous(void) {
 }
 
 const char* command_history_get_next(void) {
-    if (command_history.history_count == 0) {
+    CommandHistory *h = command_history_get();
+    if (!h || h->history_count == 0) {
         return NULL;
     }
     
-    if (command_history.display_index == -1) {
+    if (h->display_index == -1) {
         return NULL; // No navigation started yet
     }
     
     // Move to next command
-    command_history.display_index = (command_history.display_index + 1) % MAX_HISTORY_SIZE;
+    h->display_index = (h->display_index + 1) % MAX_HISTORY_SIZE;
     
     // If we've reached the current position, we're at the end
-    if (command_history.display_index == command_history.current_index) {
-        command_history.display_index = -1;
+    if (h->display_index == h->current_index) {
+        h->display_index = -1;
         return NULL;
     }
     
     // Additional safety check to ensure we have a valid command
-    if (command_history.display_index >= 0 && command_history.display_index < MAX_HISTORY_SIZE) {
-        const char* cmd = command_history.commands[command_history.display_index];
+    if (h->display_index >= 0 && h->display_index < MAX_HISTORY_SIZE) {
+        const char* cmd = h->commands[h->display_index];
         if (cmd != NULL && strlen(cmd) > 0) {
             return cmd;
         }
@@ -393,14 +422,17 @@ const char* command_history_get_next(void) {
 }
 
 void command_history_reset_display_index(void) {
-    command_history.display_index = -1;
+    CommandHistory *h = command_history_get();
+    if (h) h->display_index = -1;
 }
 
 void command_history_print(void) {
-    int start = (command_history.current_index - command_history.history_count + MAX_HISTORY_SIZE) % MAX_HISTORY_SIZE;
-    for (int i = 0; i < command_history.history_count; ++i) {
+    CommandHistory *h = command_history_get();
+    if (!h) return;
+    int start = (h->current_index - h->history_count + MAX_HISTORY_SIZE) % MAX_HISTORY_SIZE;
+    for (int i = 0; i < h->history_count; ++i) {
         int index = (start + i) % MAX_HISTORY_SIZE;
-        glog("%2d  %s\n", i + 1, command_history.commands[index]);
+        glog("%2d  %s\n", i + 1, h->commands[index]);
     }
 }
 
@@ -592,6 +624,71 @@ static void display_prompt(void) {
     prompt_displayed = true;
 }
 
+// Parse the buffered inline IR payload, transmit it, then release the buffer.
+#if CONFIG_HAS_INFRARED
+static void ir_inline_finish(void) {
+    if (ir_capture_state == IR_STATE_CAPTURING && ir_capture_buffer) {
+        if (ir_capture_pos >= IR_CAPTURE_BUF_SIZE) {
+            ir_capture_pos = IR_CAPTURE_BUF_SIZE - 1;
+        }
+        ir_capture_buffer[ir_capture_pos] = '\0';
+        infrared_signal_t sig;
+        memset(&sig, 0, sizeof(sig));
+        if (infrared_manager_parse_buffer_single(ir_capture_buffer, &sig)) {
+            ghostchi_manager_add_xp(4);
+            bool ok = infrared_manager_transmit(&sig);
+            glog("IR: send %s\n", ok ? "OK" : "FAIL");
+            if (sig.is_raw) {
+                if (sig.payload.raw.timings && sig.payload.raw.timings_size > 0) {
+                    glog("IR: signal raw len=%u freq=%luHz duty=%.2f\n",
+                         (unsigned)sig.payload.raw.timings_size,
+                         (unsigned long)sig.payload.raw.frequency,
+                         (double)sig.payload.raw.duty_cycle);
+                }
+            } else {
+                const char *proto = sig.payload.message.protocol;
+                if (proto && proto[0] != '\0') {
+                    uint32_t addr = sig.payload.message.address;
+                    uint32_t cmd = sig.payload.message.command;
+                    if (sig.name[0] != '\0') {
+                        glog("IR: signal [%s] protocol=%s addr=0x%08lX cmd=0x%08lX\n",
+                             sig.name, proto, (unsigned long)addr, (unsigned long)cmd);
+                    } else {
+                        glog("IR: signal protocol=%s addr=0x%08lX cmd=0x%08lX\n",
+                             proto, (unsigned long)addr, (unsigned long)cmd);
+                    }
+                }
+            }
+            infrared_manager_free_signal(&sig);
+        } else {
+            glog("IR inline parse failed\n");
+        }
+    }
+    ir_capture_state = IR_STATE_IDLE;
+    ir_capture_pos = 0;
+    if (ir_capture_buffer) {
+        free(ir_capture_buffer);
+        ir_capture_buffer = NULL;
+    }
+}
+#endif
+
+// Finish an inline HTML upload: hand the captured bytes to the portal and
+// release the scratch buffer.
+static void html_inline_finish(void) {
+    if (html_capture_state == HTML_STATE_CAPTURING && html_capture_buffer) {
+        wifi_manager_store_html_chunk(html_capture_buffer, html_capture_pos, true);
+        glog("HTML capture completed (%zu bytes)\n", html_capture_pos);
+    }
+    html_capture_state = HTML_STATE_IDLE;
+    html_capture_pos = 0;
+    html_close_match = 0;
+    if (html_capture_buffer) {
+        free(html_capture_buffer);
+        html_capture_buffer = NULL;
+    }
+}
+
 // HTML marker processing and IR inline handling
 static void process_html_line(const char* line) {
 #if CONFIG_HAS_INFRARED
@@ -603,45 +700,7 @@ static void process_html_line(const char* line) {
     }
 
     if (strstr(line, "[IR/CLOSE]") != NULL) {
-        if (ir_capture_state == IR_STATE_CAPTURING) {
-            ir_capture_state = IR_STATE_IDLE;
-            if (ir_capture_pos >= IR_CAPTURE_BUF_SIZE) {
-                ir_capture_pos = IR_CAPTURE_BUF_SIZE - 1;
-            }
-            ir_capture_buffer[ir_capture_pos] = '\0';
-            infrared_signal_t sig;
-            memset(&sig, 0, sizeof(sig));
-            if (infrared_manager_parse_buffer_single(ir_capture_buffer, &sig)) {
-                ghostchi_manager_add_xp(4);
-                bool ok = infrared_manager_transmit(&sig);
-                glog("IR: send %s\n", ok ? "OK" : "FAIL");
-                if (sig.is_raw) {
-                    if (sig.payload.raw.timings && sig.payload.raw.timings_size > 0) {
-                        glog("IR: signal raw len=%u freq=%luHz duty=%.2f\n",
-                             (unsigned)sig.payload.raw.timings_size,
-                             (unsigned long)sig.payload.raw.frequency,
-                             (double)sig.payload.raw.duty_cycle);
-                    }
-                } else {
-                    const char *proto = sig.payload.message.protocol;
-                    if (proto && proto[0] != '\0') {
-                        uint32_t addr = sig.payload.message.address;
-                        uint32_t cmd = sig.payload.message.command;
-                        if (sig.name[0] != '\0') {
-                            glog("IR: signal [%s] protocol=%s addr=0x%08lX cmd=0x%08lX\n",
-                                 sig.name, proto, (unsigned long)addr, (unsigned long)cmd);
-                        } else {
-                            glog("IR: signal protocol=%s addr=0x%08lX cmd=0x%08lX\n",
-                                 proto, (unsigned long)addr, (unsigned long)cmd);
-                        }
-                    }
-                }
-                infrared_manager_free_signal(&sig);
-            } else {
-                glog("IR inline parse failed\n");
-            }
-        }
-        if (ir_capture_buffer) { free(ir_capture_buffer); ir_capture_buffer = NULL; }
+        ir_inline_finish();
         return;
     }
 
@@ -656,25 +715,37 @@ static void process_html_line(const char* line) {
     }
 #endif
 
-    if (strstr(line, "[HTML/BEGIN]") != NULL) {
+    const char* html_begin = strstr(line, HTML_INLINE_BEGIN_MARKER);
+    if (html_begin != NULL && html_capture_state != HTML_STATE_CAPTURING) {
         if (!html_capture_buffer) html_capture_buffer = (char *)calloc(1, HTML_CAPTURE_BUF_SIZE);
-        html_capture_state = html_capture_buffer ? HTML_STATE_CAPTURING : HTML_STATE_IDLE;
-        html_capture_pos = 0;
-        glog("HTML capture started\n");
-        return;
-    }
-    
-    if (strstr(line, "[HTML/CLOSE]") != NULL) {
-        if (html_capture_state == HTML_STATE_CAPTURING) {
-            html_capture_state = HTML_STATE_COMPLETE;
-            wifi_manager_store_html_chunk(html_capture_buffer, html_capture_pos, true);
-            glog("HTML capture completed (%zu bytes)\n", html_capture_pos);
+        if (html_capture_buffer) {
+            html_capture_state = HTML_STATE_CAPTURING;
+            html_capture_pos = 0;
+            html_close_match = 0;
+
+            // Older clients put the first HTML line on the same line as the
+            // begin marker.  Keep whatever follows the marker on that line.
+            const char* rest = html_begin + strlen(HTML_INLINE_BEGIN_MARKER);
+            size_t rest_len = strlen(rest);
+            if (rest_len > 0) {
+                if (rest_len > HTML_CAPTURE_BUF_SIZE - 1) {
+                    rest_len = HTML_CAPTURE_BUF_SIZE - 1;
+                }
+                memcpy(html_capture_buffer, rest, rest_len);
+                html_capture_pos = rest_len;
+                if (html_capture_pos < HTML_CAPTURE_BUF_SIZE) {
+                    html_capture_buffer[html_capture_pos++] = '\n';
+                }
+            }
+            glog("HTML capture started\n");
         }
-        if (html_capture_buffer) { free(html_capture_buffer); html_capture_buffer = NULL; }
         return;
     }
-    
+
     if (html_capture_state == HTML_STATE_CAPTURING) {
+        // Defensive fallback for callers that still deliver HTML line by line.
+        // The serial loop normally captures HTML byte-by-byte, which preserves
+        // long/minified lines and the close marker.
         size_t line_len = strlen(line);
         if (html_capture_buffer && html_capture_pos + line_len + 1 < HTML_CAPTURE_BUF_SIZE) {
             memcpy(html_capture_buffer + html_capture_pos, line, line_len);
@@ -683,7 +754,7 @@ static void process_html_line(const char* line) {
         }
         return;
     }
-    
+
     handle_serial_command(line);
 }
 
@@ -766,6 +837,60 @@ void serial_task(void *pvParameter) {
 
       for (int i = 0; i < length; i++) {
         char incoming_char = (char)data[i];
+
+        // While an [HTML/BEGIN]..[HTML/CLOSE] upload is in progress, capture
+        // every byte verbatim. Parsing this data line by line would truncate
+        // long or minified HTML and lose the close marker when it shares a
+        // line with the payload.
+        if (html_capture_state == HTML_STATE_CAPTURING) {
+          const size_t html_close_len = sizeof(HTML_INLINE_CLOSE_MARKER) - 1;
+          if (html_capture_buffer && html_capture_pos < HTML_CAPTURE_BUF_SIZE - 1) {
+            html_capture_buffer[html_capture_pos++] = incoming_char;
+            if (html_capture_pos >= html_close_len &&
+                memcmp(html_capture_buffer + html_capture_pos - html_close_len,
+                       HTML_INLINE_CLOSE_MARKER, html_close_len) == 0) {
+              html_capture_pos -= html_close_len; // strip the marker itself
+              html_inline_finish();
+            }
+          } else {
+            // Payload exceeded the capture buffer. Keep consuming bytes and
+            // scanning for the close marker so the rest of the HTML is not
+            // interpreted as shell commands.
+            if (incoming_char == HTML_INLINE_CLOSE_MARKER[html_close_match]) {
+              if (++html_close_match == html_close_len) {
+                html_inline_finish();
+              }
+            } else {
+              html_close_match = (incoming_char == HTML_INLINE_CLOSE_MARKER[0]) ? 1 : 0;
+            }
+          }
+          continue;
+        }
+
+#if CONFIG_HAS_INFRARED
+        // While an [IR/BEGIN]..[IR/CLOSE] payload is streaming, buffer every byte
+        // verbatim. This bypasses the fixed-size serial line buffer so long raw
+        // .ir "data:" lines (sent by the Flipper app) are not truncated.
+        if (ir_capture_state == IR_STATE_CAPTURING) {
+          if (ir_capture_buffer && ir_capture_pos < IR_CAPTURE_BUF_SIZE - 1) {
+            ir_capture_buffer[ir_capture_pos++] = incoming_char;
+            const size_t close_len = sizeof(IR_INLINE_CLOSE_MARKER) - 1;
+            if (ir_capture_pos >= close_len &&
+                memcmp(ir_capture_buffer + ir_capture_pos - close_len,
+                       IR_INLINE_CLOSE_MARKER, close_len) == 0) {
+              ir_capture_pos -= close_len; // strip the marker itself
+              ir_inline_finish();
+            }
+          } else if (ir_capture_buffer) {
+            glog("IR inline payload too large; discarded\n");
+            ir_capture_state = IR_STATE_IDLE;
+            ir_capture_pos = 0;
+            free(ir_capture_buffer);
+            ir_capture_buffer = NULL;
+          }
+          continue;
+        }
+#endif
 
         if (process_rave_serial_byte((uint8_t)incoming_char)) {
           continue;

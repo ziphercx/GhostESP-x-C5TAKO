@@ -108,7 +108,7 @@ void main_menu_layout_get_metrics_for_size(main_menu_layout_kind_t kind, int ite
     metrics->carousel_preview_icon_target = clamp_int((int)(metrics->carousel_preview_size * 0.55f), 18, 40);
     metrics->carousel_preview_offset = metrics->carousel_button_size / 2 +
                                        metrics->carousel_preview_size / 2 + GUI_GRID * 2;
-    metrics->carousel_show_previews = screen_width >= 200 && carousel_side_space >= 48;
+    metrics->carousel_show_previews = screen_width > 240 && carousel_side_space >= 48;
     metrics->carousel_transition_distance = clamp_int(screen_width / 4, 48, 96);
 
     if (large_screen) {

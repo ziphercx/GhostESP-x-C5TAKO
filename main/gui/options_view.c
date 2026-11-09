@@ -90,6 +90,9 @@ static int default_row_height(void) {
 #else
     int w = LV_HOR_RES;
     int h = LV_VER_RES;
+    if (w <= 240 && h <= 240) {
+        return options_view_scale_row_height(32);
+    }
     bool small = (w <= 240 || h <= 240);
     return options_view_scale_row_height(small ? 40 : 55);
 #endif

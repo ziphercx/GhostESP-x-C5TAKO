@@ -1,5 +1,6 @@
 #include "managers/views/ghostchi_screen.h"
 #include "core/ghostchi_identity.h"
+#include "core/utils.h"
 #include "gui/design_tokens.h"
 
 #include "gui/lvgl_safe.h"
@@ -238,7 +239,7 @@ static void handle_select(void);
 static bool is_portrait_layout(void);
 
 static bool is_portrait_layout(void) {
-    return LV_VER_RES > LV_HOR_RES;
+    return LV_VER_RES >= LV_HOR_RES;
 }
 
 static const ghostchi_layout_t *active_layout(void) {
@@ -862,7 +863,7 @@ static void update_ui(lv_timer_t *timer) {
     int small_screen_y_offset = (LV_VER_RES <= 135) ? 8 : 0;
     if (is_portrait_layout()) {
         ghost_x = (LV_HOR_RES / 2) - (GHOST_W / 2);
-        ghost_base_y = (LV_VER_RES * 16) / 100 + layout->ghost_y_offset;
+        ghost_base_y = (LV_VER_RES <= 240 ? (LV_VER_RES * 8) / 100 : (LV_VER_RES * 16) / 100) + layout->ghost_y_offset;
     } else {
         ghost_x = (split / 2) - (GHOST_H / 2);
         ghost_base_y = (compact_landscape ? 2 : layout->ghost_y_offset) + small_screen_y_offset;
@@ -1084,7 +1085,9 @@ static void update_ui(lv_timer_t *timer) {
         set_stat(1, "CH", snap.current_channel ? buf : "--");
         snprintf(buf, sizeof(buf), "%u", (unsigned)snap.aps_visible);
         set_stat(2, "APS", buf);
-        set_stat(3, "TARGET", snap.target_ssid[0] ? snap.target_ssid : "None");
+        char target_disp[sizeof(snap.target_ssid)];
+        privacy_redact_ssid_copy(snap.target_ssid, target_disp, sizeof(target_disp));
+        set_stat(3, "TARGET", snap.target_ssid[0] ? target_disp : "None");
         snprintf(buf, sizeof(buf), "%u", (unsigned)snap.handshakes);
         set_stat(4, "PWND", buf);
         snprintf(buf, sizeof(buf), "%u%%", (unsigned)snap.confidence);

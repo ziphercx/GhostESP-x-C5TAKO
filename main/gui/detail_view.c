@@ -82,7 +82,7 @@ struct detail_view_t {
 };
 
 static inline bool detail_view_should_use_compact_layout(int w, int h) {
-    return (w > h && h <= 160);
+    return (w > h && h <= 160) || (w <= 240 && h <= 240);
 }
 
 static inline bool ensure_capacity(detail_view_t *dv, int need) {

@@ -455,6 +455,9 @@ static lv_obj_t *create_carousel_card(const main_menu_layout_metrics_t *layout,
         lv_label_set_text(label, menu_items[menu_index].name);
         lv_obj_set_style_text_font(label, accessibility_get_font_body(), 0);
         lv_obj_set_style_text_color(label, menu_text_color, 0);
+        lv_obj_set_width(label, layout->carousel_button_size - 12);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
         if (asset_pack_is_loaded()) {
             lv_obj_set_style_bg_color(label, lv_color_hex(0x000000), 0);
             lv_obj_set_style_bg_opa(label, LV_OPA_60, 0);
@@ -1573,12 +1576,11 @@ void main_menu_create(void) {
 
     // Only show if the user wants them and the device supports them.
     if (should_show_nav_buttons) {
-#ifdef CONFIG_LVGL_TOUCH
-        should_show_nav_buttons = true;
-#else
-        // Check screen dimensions at runtime
+#ifdef CONFIG_USE_TOUCHSCREEN
         int screen_width = lv_disp_get_hor_res(lv_disp_get_default());
         should_show_nav_buttons = (screen_width > 200);
+#else
+        should_show_nav_buttons = false;
 #endif
     }
 
@@ -1661,13 +1663,10 @@ void main_menu_create(void) {
         lv_obj_align(menu_container, layout.container_align, layout.container_x, layout.container_y);
         if (current_layout == MAIN_MENU_LAYOUT_LAUNCHER || current_layout == MAIN_MENU_LAYOUT_COMPACT) {
             lv_obj_set_size(menu_container, layout.container_width, layout.container_height);
-        }
-#if GUI_LARGE_SCREEN
-        else if (current_layout == MAIN_MENU_LAYOUT_LIST) {
+        } else if (current_layout == MAIN_MENU_LAYOUT_LIST) {
             lv_obj_set_size(menu_container, layout.container_width, layout.container_height);
             lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, status_bar_height);
         }
-#endif
     }
 
     // also shift nav buttons down so they remain vertically centered with the menu

@@ -524,14 +524,14 @@ static void add_plugin_apps_in_folder(const char *key, bool include_loaded_plugi
     }
 }
 
-/* Native apps with no category, or one the firmware does not define, stay at
- * the root next to the unfiled built-ins. Pinned apps are already there. */
+/* Categorised native apps live in firmware or dynamic folders. Only unfiled
+ * apps and apps explicitly pinned by the user belong at the root. */
 static void add_uncategorised_plugin_apps(bool include_loaded_plugins) {
     if (!include_loaded_plugins) return;
     for (int i = 0; i < plugin_manager_count(); ++i) {
         const plugin_app_manifest_t *app = plugin_manager_get(i);
         if (!plugin_app_displayable(app)) continue;
-        if (!plugin_app_pinned_to_root(app) && menu_catalog_folder_index(app->category) >= 0) continue;
+        if (!plugin_app_pinned_to_root(app) && app->category[0] != '\0') continue;
         add_plugin_app_item(app);
     }
 }
@@ -543,6 +543,16 @@ static void rebuild_app_items(bool include_loaded_plugins) {
 
     int count = 0;
     menu_catalog_item_t *items = menu_catalog_collect(MENU_PLACE_APPS, true, &count);
+
+    /* The shared catalog also contains SD apps. They are added below through
+     * the plugin path, which sets plugin_id for icons and launch handling.
+     * Keep only built-ins here so native apps and folder counts aren't doubled. */
+    int builtin_count = 0;
+    for (int i = 0; items && i < count; ++i) {
+        if (strncmp(items[i].id, "plugin:", 7) == 0) continue;
+        items[builtin_count++] = items[i];
+    }
+    count = builtin_count;
 
     if (in_submenu) {
         add_back_app_item();
@@ -790,6 +800,9 @@ static lv_obj_t *create_app_carousel_card(const main_menu_layout_metrics_t *layo
         lv_label_set_text(label, label_text);
         lv_obj_set_style_text_font(label, accessibility_get_font_body(), 0);
         lv_obj_set_style_text_color(label, apps_text_color, 0);
+        lv_obj_set_width(label, layout->carousel_button_size - 12);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
         if (asset_pack_is_loaded()) {
             lv_obj_set_style_bg_color(label, lv_color_hex(0x000000), 0);
             lv_obj_set_style_bg_opa(label, LV_OPA_60, 0);
@@ -1447,13 +1460,10 @@ static void apps_plugin_reload_done(void *arg) {
         lv_obj_align(apps_container, layout.container_align, layout.container_x, layout.container_y);
         if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER || apps_layout == MAIN_MENU_LAYOUT_COMPACT) {
             lv_obj_set_size(apps_container, layout.container_width, layout.container_height);
-        }
-#if GUI_LARGE_SCREEN
-        else if (apps_layout == MAIN_MENU_LAYOUT_LIST) {
+        } else if (apps_layout == MAIN_MENU_LAYOUT_LIST) {
             lv_obj_set_size(apps_container, layout.container_width, layout.container_height);
             lv_obj_align(apps_container, LV_ALIGN_TOP_MID, 0, status_bar_height);
         }
-#endif
     }
 
     bool should_show_nav_buttons = settings_get_nav_buttons_enabled(&G_Settings);
@@ -1467,11 +1477,11 @@ static void apps_plugin_reload_done(void *arg) {
 #endif
 
     if (should_show_nav_buttons) {
-#ifdef CONFIG_LVGL_TOUCH
-        should_show_nav_buttons = true;
-#else
+#ifdef CONFIG_USE_TOUCHSCREEN
         int screen_width = lv_disp_get_hor_res(lv_disp_get_default());
         should_show_nav_buttons = (screen_width > 200);
+#else
+        should_show_nav_buttons = false;
 #endif
     }
 
