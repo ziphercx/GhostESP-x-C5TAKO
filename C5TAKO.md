@@ -46,14 +46,17 @@ verified independently after packaging.
 | SD CS | 5, same SPI2 bus as display |
 | Left / Center / Up / Right / Down | 23 / 4 / 24 / 0 / 28, active low |
 | Battery ADC / divider enable | 6 (ADC1 channel 5) / 26, active high |
-| Unused CC1101 CS / buzzer | 2 high / 3 low |
+| CC1101 CS / GDO0 / GDO2 | 2 / 12 / 11 (shared SPI2) |
+| Buzzer | 3 low |
 | User LED | 27, active low, held off |
 
 Display starts at 240x240, RGB, inversion on, SPI mode 0 at 40MHz,
 rotation 0 (`MADCTL=0x00`), explicit X/Y offsets 0/0. These match the working
 Bruce/Marauder reference. Touch and optional peer UART are disabled because
 the default peer pins 6/7 conflict with the battery/display wiring. CC1101
-is deselected before SPI starts; its radio implementation is not enabled.
+Sub-GHz (`CONFIG_HAS_SUBGHZ=y` on shared SPI2), BadBLE HID, and Chameleon Ultra
+BLE NFC (`CONFIG_NFC_CHAMELEON=y`) are enabled using the enlarged 8MB factory
+partition layout (`partitions_banshee_c5_factory.csv`).
 The existing IDF SPI device arbitration and SD shared-bus paths are reused.
 
 Battery reading reuses GhostESP's calibrated ADC path: enable divider, wait

@@ -162,7 +162,7 @@ static volatile bool s_stream_to_peer = false;
 static volatile bool s_waterfall_stream_requested = false;
 
 static spi_device_handle_t s_spi_dev = NULL;
-static spi_host_device_t s_spi_host = SPI3_HOST;
+static spi_host_device_t s_spi_host = SPI2_HOST;
 static bool s_spi_bus_initialized_by_us = false;
 
 static uint8_t s_levels[SUBGHZ_SCANNER_CHANNEL_COUNT];
